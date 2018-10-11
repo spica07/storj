@@ -201,7 +201,9 @@ func TestMeetsRestrictions(t *testing.T) {
 		expect bool
 	}{
 		{	testID: "pass one",
-			r: []pb.Restriction{},
+			r: []pb.Restriction{
+				
+			},
 			n: pb.Node{
 				Restrictions: &pb.NodeRestrictions{
 					FreeBandwidth: int64(),
