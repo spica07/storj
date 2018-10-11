@@ -144,7 +144,6 @@ func (k *Kademlia) GetNodes(ctx context.Context, start string, limit int, restri
 // GetRoutingTable provides the routing table for the Kademlia DHT
 func (k *Kademlia) GetRoutingTable(ctx context.Context) (dht.RoutingTable, error) {
 	return k.routingTable, nil
-
 }
 
 // Bootstrap contacts one of a set of pre defined trusted nodes on the network and
