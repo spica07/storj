@@ -182,15 +182,53 @@ func testNode(t *testing.T, bn []pb.Node) (*Kademlia, *grpc.Server) {
 
 func TestGetNodes(t *testing.T) {
 	// func (k *Kademlia) GetNodes(ctx context.Context, start string, limit int, restrictions ...pb.Restriction) ([]*pb.Node, error) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
 
-	// cases := []struct {
-	// }{
-	// 	{},
-	// 	{},
-	// }
-	// for _, v := range cases {
+	srv, mns := newTestServer([]*pb.Node{&pb.Node{Id: "foo"}})
+	assert.NotNil(t, mns)
+	go func() { _ = srv.Serve(lis) }()
+	defer srv.Stop()
+	k := func() *Kademlia {
+		// make new identity
+		id, err := node.NewID()
+		assert.NoError(t, err)
+		id2, err := node.NewID()
+		assert.NoError(t, err)
+		// initialize kademlia
+		ca, err := provider.NewCA(ctx, 12, 4)
+		assert.NoError(t, err)
+		identity, err := ca.NewIdentity()
+		assert.NoError(t, err)
+		k, err := NewKademlia(id, []pb.Node{pb.Node{Id: id2.String(), Address: &pb.NodeAddress{Address: lis.Addr().String()}}}, lis.Addr().String(), identity, "db")
+		assert.NoError(t, err)
+		return k
+	}()
+	k.routingTable.ConnectionSuccess(&pb.Node{
+		Id: "A",
+		Restrictions: &pb.NodeRestrictions{
+			FreeBandwidth: int64(1),
+		},
+	})
+	k.routingTable.ConnectionSuccess(&pb.Node{
+		Id: "B",
+		Restrictions: &pb.NodeRestrictions{
+			FreeBandwidth: int64(2),
+		},
+	})
+	k.routingTable.ConnectionSuccess(&pb.Node{
+		Id: "C",
+		Restrictions: &pb.NodeRestrictions{
+			FreeBandwidth: int64(3),
+		},
+	})
+	k.routingTable.ConnectionSuccess(&pb.Node{
+		Id: "D",
+		Restrictions: &pb.NodeRestrictions{
+			FreeBandwidth: int64(4),
+		},
+	})
 
-	// }
 }
 
 func TestMeetsRestrictions(t *testing.T) {
