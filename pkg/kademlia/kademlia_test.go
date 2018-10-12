@@ -200,32 +200,89 @@ func TestMeetsRestrictions(t *testing.T) {
 		n      pb.Node
 		expect bool
 	}{
-		{	testID: "pass one",
+		{testID: "pass one",
 			r: []pb.Restriction{
-				
+				pb.Restriction{
+					Operator: pb.Restriction_EQ,
+					Operand:  pb.Restriction_freeBandwidth,
+					Value:    int64(1),
+				},
 			},
 			n: pb.Node{
 				Restrictions: &pb.NodeRestrictions{
-					FreeBandwidth: int64(),
-					FreeDisk:      int64(),
+					FreeBandwidth: int64(1),
 				},
 			},
+			expect: true,
 		},
 		{testID: "pass multiple",
-			r: []pb.Restriction{},
-			n: pb.Node{},
+			r: []pb.Restriction{
+				pb.Restriction{
+					Operator: pb.Restriction_LTE,
+					Operand:  pb.Restriction_freeBandwidth,
+					Value:    int64(2),
+				},
+				pb.Restriction{
+					Operator: pb.Restriction_GTE,
+					Operand:  pb.Restriction_freeDisk,
+					Value:    int64(2),
+				},
+			},
+			n: pb.Node{
+				Restrictions: &pb.NodeRestrictions{
+					FreeBandwidth: int64(1),
+					FreeDisk:      int64(3),
+				},
+			},
+			expect: true,
 		},
 		{testID: "fail one",
-			r: []pb.Restriction{}, 
-			n: pb.Node{},
+			r: []pb.Restriction{
+				pb.Restriction{
+					Operator: pb.Restriction_LT,
+					Operand:  pb.Restriction_freeBandwidth,
+					Value:    int64(2),
+				},
+				pb.Restriction{
+					Operator: pb.Restriction_GT,
+					Operand:  pb.Restriction_freeDisk,
+					Value:    int64(2),
+				},
+			},
+			n: pb.Node{
+				Restrictions: &pb.NodeRestrictions{
+					FreeBandwidth: int64(2),
+					FreeDisk:      int64(3),
+				},
+			},
+			expect: false,
 		},
 		{testID: "fail multiple",
-			r: []pb.Restriction{},
-			n: pb.Node{},
+			r: []pb.Restriction{
+				pb.Restriction{
+					Operator: pb.Restriction_LT,
+					Operand:  pb.Restriction_freeBandwidth,
+					Value:    int64(2),
+				},
+				pb.Restriction{
+					Operator: pb.Restriction_GT,
+					Operand:  pb.Restriction_freeDisk,
+					Value:    int64(2),
+				},
+			},
+			n: pb.Node{
+				Restrictions: &pb.NodeRestrictions{
+					FreeBandwidth: int64(2),
+					FreeDisk:      int64(2),
+				},
+			},
+			expect: false,
 		},
 	}
-	for _, v := range cases {
-		result := meetsRestrictions(v.r, v.n)
-		assert.Equal(t, v.expect, result)
+	for _, c := range cases {
+		t.Run(c.testID, func(t *testing.T) {
+			result := meetsRestrictions(c.r, c.n)
+			assert.Equal(t, c.expect, result)
+		})
 	}
 }

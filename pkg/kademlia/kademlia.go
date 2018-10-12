@@ -297,7 +297,7 @@ func meetsRestrictions(rs []pb.Restriction, n pb.Node) bool {
 		}
 		switch op {
 		case pb.Restriction_EQ:
-			if comp == val {
+			if comp != val { //== or != ?
 				return false
 			}
 		case pb.Restriction_LT:
