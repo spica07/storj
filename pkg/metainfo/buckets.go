@@ -28,15 +28,12 @@ func (db *Buckets) CreateBucket(ctx context.Context, bucket string, info *storj.
 	var reader bytes.Reader
 
 	var exp time.Time
-	meta, err := db.store.Put(ctx, paths.New(bucket), &reader, objects.SerializableMeta{}, exp)
+	meta, err := db.store.Put(ctx, bucketPath(bucket), &reader, objects.SerializableMeta{}, exp)
 	if err != nil {
 		return storj.Bucket{}, err
 	}
 
-	return storj.Bucket{
-		Name:    bucket,
-		Created: meta.Modified,
-	}, nil
+	return bucketFromMeta(bucket, meta), nil
 }
 
 // DeleteBucket deletes bucket
@@ -45,7 +42,7 @@ func (db *Buckets) DeleteBucket(ctx context.Context, bucket string) error {
 		return buckets.NoBucketError.New("")
 	}
 
-	return db.store.Delete(ctx, paths.New(bucket))
+	return db.store.Delete(ctx, bucketPath(bucket))
 }
 
 // GetBucket gets bucket information
@@ -54,15 +51,12 @@ func (db *Buckets) GetBucket(ctx context.Context, bucket string) (storj.Bucket, 
 		return storj.Bucket{}, buckets.NoBucketError.New("")
 	}
 
-	meta, err := db.store.Meta(ctx, paths.New(bucket))
+	meta, err := db.store.Meta(ctx, bucketPath(bucket))
 	if err != nil {
 		return storj.Bucket{}, err
 	}
 
-	return storj.Bucket{
-		Name:    bucket,
-		Created: meta.Modified,
-	}, nil
+	return bucketFromMeta(bucket, meta), nil
 }
 
 // ListBuckets lists buckets
@@ -87,10 +81,7 @@ func (db *Buckets) ListBuckets(ctx context.Context, first string, limit int) (st
 	}
 
 	for _, item := range items {
-		list.Buckets = append(list.Buckets, storj.Bucket{
-			Name:    item.Path.String(),
-			Created: item.Meta.Modified,
-		})
+		list.Buckets = append(list.Buckets, bucketFromMeta(item.Path.String(), item.Meta))
 	}
 
 	if len(list.Buckets) > 0 && more {
@@ -98,4 +89,11 @@ func (db *Buckets) ListBuckets(ctx context.Context, first string, limit int) (st
 	}
 
 	return list, nil
+}
+
+func bucketFromMeta(bucket string, meta objects.Meta) storj.Bucket {
+	return storj.Bucket{
+		Name:    bucket,
+		Created: meta.Modified,
+	}
 }

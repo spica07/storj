@@ -21,9 +21,11 @@ type Object struct {
 	Metadata []byte
 
 	ContentType string
-	Created     time.Time
-	Modified    time.Time
-	Expires     time.Time
+	UserDefined map[string]string
+
+	Created  time.Time
+	Modified time.Time
+	Expires  time.Time
 
 	Stream
 }
