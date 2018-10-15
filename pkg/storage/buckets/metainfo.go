@@ -14,12 +14,12 @@ import (
 	"storj.io/storj/pkg/storj"
 )
 
-type metainfo struct {
+type Metainfo struct {
 	store objects.Store
 }
 
 // CreateBucket creates a new bucket with the specified information
-func (db *metainfo) CreateBucket(ctx context.Context, bucket string, info *storj.Bucket) (storj.Bucket, error) {
+func (db *Metainfo) CreateBucket(ctx context.Context, bucket string, info *storj.Bucket) (storj.Bucket, error) {
 	if bucket == "" {
 		return storj.Bucket{}, NoBucketError.New("")
 	}
@@ -39,7 +39,7 @@ func (db *metainfo) CreateBucket(ctx context.Context, bucket string, info *storj
 }
 
 // DeleteBucket deletes bucket
-func (db *metainfo) DeleteBucket(ctx context.Context, bucket string) error {
+func (db *Metainfo) DeleteBucket(ctx context.Context, bucket string) error {
 	if bucket == "" {
 		return NoBucketError.New("")
 	}
@@ -48,7 +48,7 @@ func (db *metainfo) DeleteBucket(ctx context.Context, bucket string) error {
 }
 
 // GetBucket gets bucket information
-func (db *metainfo) GetBucket(ctx context.Context, bucket string) (storj.Bucket, error) {
+func (db *Metainfo) GetBucket(ctx context.Context, bucket string) (storj.Bucket, error) {
 	if bucket == "" {
 		return storj.Bucket{}, NoBucketError.New("")
 	}
@@ -65,7 +65,7 @@ func (db *metainfo) GetBucket(ctx context.Context, bucket string) (storj.Bucket,
 }
 
 // ListBuckets lists buckets
-func (db *metainfo) ListBuckets(ctx context.Context, first string, limit int) (storj.BucketList, error) {
+func (db *Metainfo) ListBuckets(ctx context.Context, first string, limit int) (storj.BucketList, error) {
 	// TODO: fix unable to get startAfter from first
 	startAfter := paths.New(first)
 	if len(startAfter) > 0 {
