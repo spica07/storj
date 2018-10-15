@@ -91,6 +91,7 @@ func (db *metainfo) ListBuckets(ctx context.Context, first string, limit int) (s
 			Created: item.Meta.Modified,
 		})
 	}
+
 	if len(list.Buckets) > 0 && more {
 		list.NextFirst = list.Buckets[len(list.Buckets)-1].Name + "\x00"
 	}
