@@ -52,6 +52,12 @@ func NewTestServer() (*Server, error) {
 	return NewServer(identity, "127.0.0.1:0")
 }
 
+// ID returns the identity this server has
+// TODO: hide
+func (server *Server) ID() string {
+	return server.identity.ID.String()
+}
+
 // Identity returns the identity this server has
 // TODO: hide
 func (server *Server) Identity() *provider.FullIdentity {

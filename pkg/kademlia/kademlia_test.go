@@ -11,16 +11,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 
 	"storj.io/storj/pkg/dht"
 	"storj.io/storj/pkg/node"
 	"storj.io/storj/pkg/pb"
 	"storj.io/storj/pkg/provider"
+	"storj.io/storj/pkg/transport"
 )
 
 // helper function to get kademlia base configs without root Config struct
-func kadconfig() KadConfig {
+func testKademliaConfig() KadConfig {
 	return KadConfig{
 		Alpha:                       5,
 		DefaultIDLength:             256,
@@ -70,7 +70,7 @@ func TestNewKademlia(t *testing.T) {
 
 	for _, v := range cases {
 		assert.NoError(t, v.setup())
-		kc := kadconfig()
+		kc := testKademliaConfig()
 		ca, err := provider.NewCA(context.Background(), 12, 4)
 		assert.NoError(t, err)
 		identity, err := ca.NewIdentity()
@@ -84,11 +84,14 @@ func TestNewKademlia(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
+	server, err := transport.NewTestServer()
+	assert.NoError(t, err)
+
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	addr := lis.Addr().String()
 
 	assert.NoError(t, err)
-	kc := kadconfig()
+	kc := testKademliaConfig()
 
 	srv, mns := newTestServer([]*pb.Node{&pb.Node{Id: "foo"}})
 	go func() { _ = srv.Serve(lis) }()
@@ -177,29 +180,17 @@ func TestBootstrap(t *testing.T) {
 
 }
 
-func testNode(t *testing.T, bn []pb.Node) (*Kademlia, *grpc.Server) {
-	// new address
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	assert.NoError(t, err)
-	// new config
-	kc := kadconfig()
-	// new identity
-	fid, err := newTestIdentity()
-	id := dht.NodeID(fid.ID)
-	assert.NoError(t, err)
-	// new kademlia
-	k, err := NewKademlia(id, bn, lis.Addr().String(), fid, "db", kc)
-	assert.NoError(t, err)
-	s := node.NewServer(k)
-	// new ident opts
-	identOpt, err := fid.ServerOption()
+func testNode(t *testing.T, bn []pb.Node) (*Kademlia, *transport.Server) {
+	server, err := transport.NewTestServer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kad, err := NewKademlia(server.ID(), bn, server.Addr(), server.Identity(), "db", testKademliaConfig())
 	assert.NoError(t, err)
 
-	grpcServer := grpc.NewServer(identOpt)
+	pb.RegisterNodesServer(server.GRPC(), node.NewServer(kad))
 
-	pb.RegisterNodesServer(grpcServer, s)
-	go func() { _ = grpcServer.Serve(lis) }()
-
-	return k, grpcServer
+	return k, server.GRPC()
 
 }
