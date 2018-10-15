@@ -1,7 +1,7 @@
 // Copyright (C) 2018 Storj Labs, Inc.
 // See LICENSE for copying information.
 
-package buckets
+package metainfo
 
 import (
 	"bytes"
@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"storj.io/storj/pkg/paths"
+	"storj.io/storj/pkg/storage/buckets"
 	"storj.io/storj/pkg/storage/meta"
 	"storj.io/storj/pkg/storage/objects"
 	"storj.io/storj/pkg/storj"
 )
 
-type Metainfo struct {
+type Buckets struct {
 	store objects.Store
 }
 
 // CreateBucket creates a new bucket with the specified information
-func (db *Metainfo) CreateBucket(ctx context.Context, bucket string, info *storj.Bucket) (storj.Bucket, error) {
+func (db *Buckets) CreateBucket(ctx context.Context, bucket string, info *storj.Bucket) (storj.Bucket, error) {
 	if bucket == "" {
-		return storj.Bucket{}, NoBucketError.New("")
+		return storj.Bucket{}, buckets.NoBucketError.New("")
 	}
 
 	var reader bytes.Reader
@@ -39,18 +40,18 @@ func (db *Metainfo) CreateBucket(ctx context.Context, bucket string, info *storj
 }
 
 // DeleteBucket deletes bucket
-func (db *Metainfo) DeleteBucket(ctx context.Context, bucket string) error {
+func (db *Buckets) DeleteBucket(ctx context.Context, bucket string) error {
 	if bucket == "" {
-		return NoBucketError.New("")
+		return buckets.NoBucketError.New("")
 	}
 
 	return db.store.Delete(ctx, paths.New(bucket))
 }
 
 // GetBucket gets bucket information
-func (db *Metainfo) GetBucket(ctx context.Context, bucket string) (storj.Bucket, error) {
+func (db *Buckets) GetBucket(ctx context.Context, bucket string) (storj.Bucket, error) {
 	if bucket == "" {
-		return storj.Bucket{}, NoBucketError.New("")
+		return storj.Bucket{}, buckets.NoBucketError.New("")
 	}
 
 	meta, err := db.store.Meta(ctx, paths.New(bucket))
@@ -65,7 +66,7 @@ func (db *Metainfo) GetBucket(ctx context.Context, bucket string) (storj.Bucket,
 }
 
 // ListBuckets lists buckets
-func (db *Metainfo) ListBuckets(ctx context.Context, first string, limit int) (storj.BucketList, error) {
+func (db *Buckets) ListBuckets(ctx context.Context, first string, limit int) (storj.BucketList, error) {
 	// TODO: fix unable to get startAfter from first
 	startAfter := paths.New(first)
 	if len(startAfter) > 0 {
