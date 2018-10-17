@@ -38,19 +38,19 @@ type dialer interface {
 }
 
 type defaultDialer struct {
-	t        transport.Client
-	identity *provider.FullIdentity
+	transport transport.Client
+	identity  *provider.FullIdentity
 }
 
-func (d *defaultDialer) dial(ctx context.Context, node *pb.Node) (ps client.PSClient, err error) {
+func (dialer *defaultDialer) dial(ctx context.Context, node *pb.Node) (ps client.PSClient, err error) {
 	defer mon.Task()(&ctx)(&err)
 
-	c, err := d.t.DialNode(ctx, node)
+	conn, err := dialer.transport.DialNode(ctx, node)
 	if err != nil {
 		return nil, err
 	}
 
-	return client.NewPSClient(c, 0, d.identity.Key)
+	return client.NewPSClient(conn, 0, dialer.identity.Key)
 }
 
 type ecClient struct {
@@ -59,8 +59,8 @@ type ecClient struct {
 }
 
 // NewClient from the given TransportClient and max buffer memory
-func NewClient(identity *provider.FullIdentity, t transport.Client, mbm int) Client {
-	d := defaultDialer{identity: identity, t: t}
+func NewClient(identity *provider.FullIdentity, transport transport.Client, mbm int) Client {
+	d := defaultDialer{identity: identity, transport: transport}
 	return &ecClient{d: &d, mbm: mbm}
 }
 
@@ -88,8 +88,15 @@ func (ec *ecClient) Put(ctx context.Context, nodes []*pb.Node, rs eestream.Redun
 	infos := make(chan info, len(nodes))
 
 	for i, n := range nodes {
+
 		go func(i int, n *pb.Node) {
+			if n == nil {
+				_, err := io.Copy(ioutil.Discard, readers[i])
+				infos <- info{i: i, err: err}
+				return
+			}
 			derivedPieceID, err := pieceID.Derive([]byte(n.GetId()))
+
 			if err != nil {
 				zap.S().Errorf("Failed deriving piece id for %s: %v", pieceID, err)
 				infos <- info{i: i, err: err}
@@ -102,6 +109,7 @@ func (ec *ecClient) Put(ctx context.Context, nodes []*pb.Node, rs eestream.Redun
 				infos <- info{i: i, err: err}
 				return
 			}
+
 			err = ps.Put(ctx, derivedPieceID, readers[i], expiration, &pb.PayerBandwidthAllocation{})
 			// normally the bellow call should be deferred, but doing so fails
 			// randomly the unit tests
@@ -275,7 +283,7 @@ func unique(nodes []*pb.Node) bool {
 	// sort the ids and check for identical neighbors
 	sort.Strings(ids)
 	for i := 1; i < len(ids); i++ {
-		if ids[i] == ids[i-1] {
+		if ids[i] != "" && ids[i] == ids[i-1] {
 			return false
 		}
 	}
