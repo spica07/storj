@@ -20,6 +20,7 @@ import (
 	"storj.io/storj/pkg/pb"
 	pdb "storj.io/storj/pkg/pointerdb/pdbclient"
 	mock_pointerdb "storj.io/storj/pkg/pointerdb/pdbclient/mocks"
+	"storj.io/storj/pkg/ranger"
 	mock_ecclient "storj.io/storj/pkg/storage/ec/mocks"
 )
 
@@ -117,8 +118,9 @@ func TestSegmentStorePutRemote(t *testing.T) {
 			).Return([]*pb.Node{
 				{Id: "im-a-node"},
 			}, nil),
+			mockPDB.EXPECT().SignedMessage(),
 			mockEC.EXPECT().Put(
-				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 			),
 			mockES.EXPECT().RequiredCount().Return(1),
 			mockES.EXPECT().TotalCount().Return(1),
@@ -234,6 +236,86 @@ func TestSegmentStoreGetInline(t *testing.T) {
 	}
 }
 
+func TestSegmentStoreRepairRemote(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ti := time.Unix(0, 0).UTC()
+	someTime, err := ptypes.TimestampProto(ti)
+	assert.NoError(t, err)
+
+	for _, tt := range []struct {
+		pathInput               string
+		thresholdSize           int
+		pointerType             pb.Pointer_DataType
+		size                    int64
+		metadata                []byte
+		lostPieces              []int
+		newNodes                []*pb.Node
+		data                    string
+		strsize, offset, length int64
+		substr                  string
+		meta                    Meta
+	}{
+		{"path/1/2/3", 10, pb.Pointer_REMOTE, int64(3), []byte("metadata"), []int{}, []*pb.Node{{Id: "1"}, {Id: "2"}}, "abcdefghijkl", 12, 1, 4, "bcde", Meta{}},
+	} {
+		mockOC := mock_overlay.NewMockClient(ctrl)
+		mockEC := mock_ecclient.NewMockClient(ctrl)
+		mockPDB := mock_pointerdb.NewMockClient(ctrl)
+		mockES := mock_eestream.NewMockErasureScheme(ctrl)
+		rs := eestream.RedundancyStrategy{
+			ErasureScheme: mockES,
+		}
+
+		ss := segmentStore{mockOC, mockEC, mockPDB, rs, tt.thresholdSize}
+		assert.NotNil(t, ss)
+
+		p := paths.New(tt.pathInput)
+
+		calls := []*gomock.Call{
+			mockPDB.EXPECT().Get(
+				gomock.Any(), gomock.Any(),
+			).Return(&pb.Pointer{
+				Type: tt.pointerType,
+				Remote: &pb.RemoteSegment{
+					Redundancy: &pb.RedundancyScheme{
+						Type:             pb.RedundancyScheme_RS,
+						MinReq:           1,
+						Total:            2,
+						RepairThreshold:  1,
+						SuccessThreshold: 2,
+					},
+					PieceId:      "here's my piece id",
+					RemotePieces: []*pb.RemotePiece{},
+				},
+				CreationDate:   someTime,
+				ExpirationDate: someTime,
+				Size:           tt.size,
+				Metadata:       tt.metadata,
+			}, nil),
+			mockOC.EXPECT().BulkLookup(gomock.Any(), gomock.Any()),
+			mockOC.EXPECT().Choose(gomock.Any(), gomock.Any()).Return(tt.newNodes, nil),
+			mockPDB.EXPECT().SignedMessage(),
+			mockEC.EXPECT().Get(
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+			).Return(ranger.ByteRanger([]byte(tt.data)), nil),
+			mockEC.EXPECT().Put(
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+			).Return(tt.newNodes, nil),
+			mockES.EXPECT().RequiredCount().Return(1),
+			mockES.EXPECT().TotalCount().Return(1),
+			mockES.EXPECT().ErasureShareSize().Return(1),
+			mockPDB.EXPECT().Put(
+				gomock.Any(), gomock.Any(), gomock.Any(),
+			).Return(nil),
+		}
+		gomock.InOrder(calls...)
+
+		err := ss.Repair(ctx, p, tt.lostPieces)
+		assert.NoError(t, err)
+	}
+}
+
 func TestSegmentStoreGetRemote(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -286,8 +368,9 @@ func TestSegmentStoreGetRemote(t *testing.T) {
 				Metadata:       tt.metadata,
 			}, nil),
 			mockOC.EXPECT().BulkLookup(gomock.Any(), gomock.Any()),
+			mockPDB.EXPECT().SignedMessage(),
 			mockEC.EXPECT().Get(
-				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 			),
 		}
 		gomock.InOrder(calls...)
@@ -402,8 +485,9 @@ func TestSegmentStoreDeleteRemote(t *testing.T) {
 				Metadata:       tt.metadata,
 			}, nil),
 			mockOC.EXPECT().BulkLookup(gomock.Any(), gomock.Any()),
+			mockPDB.EXPECT().SignedMessage(),
 			mockEC.EXPECT().Delete(
-				gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 			),
 			mockPDB.EXPECT().Delete(
 				gomock.Any(), gomock.Any(),

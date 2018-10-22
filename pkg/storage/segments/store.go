@@ -6,7 +6,6 @@ package segments
 import (
 	"context"
 	"io"
-	"log"
 	"time"
 
 	"github.com/golang/protobuf/ptypes"
@@ -124,8 +123,12 @@ func (s *segmentStore) Put(ctx context.Context, data io.Reader, expiration time.
 		pieceID := client.NewPieceID()
 		sizedReader := SizeReader(peekReader)
 
+		signedMessage, err := s.pdb.SignedMessage()
+		if err != nil {
+			return Meta{}, Error.Wrap(err)
+		}
 		// puts file to ecclient
-		successfulNodes, err := s.ec.Put(ctx, nodes, s.rs, pieceID, sizedReader, expiration)
+		successfulNodes, err := s.ec.Put(ctx, nodes, s.rs, pieceID, sizedReader, expiration, signedMessage)
 		if err != nil {
 			return Meta{}, Error.Wrap(err)
 		}
@@ -196,13 +199,6 @@ func (s *segmentStore) Get(ctx context.Context, path paths.Path) (
 	rr ranger.Ranger, meta Meta, err error) {
 	defer mon.Task()(&ctx)(&err)
 
-	//c := make(chan bool, 1)
-	log.Println("KISHORE --> Testing the repair START ******")
-	lostPieces := []int{1, 2}
-	s.Repair(ctx, path, lostPieces)
-
-	log.Println("KISHORE --> Testing the repair END ******")
-	//<-c
 	pr, err := s.pdb.Get(ctx, path)
 	if err != nil {
 		return nil, Meta{}, Error.Wrap(err)
@@ -210,7 +206,7 @@ func (s *segmentStore) Get(ctx context.Context, path paths.Path) (
 
 	if pr.GetType() == pb.Pointer_REMOTE {
 		seg := pr.GetRemote()
-		pid := client.PieceID(seg.PieceId)
+		pid := client.PieceID(seg.GetPieceId())
 		nodes, err := s.lookupNodes(ctx, seg)
 		if err != nil {
 			return nil, Meta{}, Error.Wrap(err)
@@ -221,7 +217,11 @@ func (s *segmentStore) Get(ctx context.Context, path paths.Path) (
 			return nil, Meta{}, err
 		}
 
-		rr, err = s.ec.Get(ctx, nodes, es, pid, pr.GetSize())
+		signedMessage, err := s.pdb.SignedMessage()
+		if err != nil {
+			return nil, Meta{}, Error.Wrap(err)
+		}
+		rr, err = s.ec.Get(ctx, nodes, es, pid, pr.GetSize(), signedMessage)
 		if err != nil {
 			return nil, Meta{}, Error.Wrap(err)
 		}
@@ -258,8 +258,12 @@ func (s *segmentStore) Delete(ctx context.Context, path paths.Path) (err error) 
 			return Error.Wrap(err)
 		}
 
+		signedMessage, err := s.pdb.SignedMessage()
+		if err != nil {
+			return Error.Wrap(err)
+		}
 		// ecclient sends delete request
-		err = s.ec.Delete(ctx, nodes, pid)
+		err = s.ec.Delete(ctx, nodes, pid, signedMessage)
 		if err != nil {
 			return Error.Wrap(err)
 		}
@@ -281,7 +285,7 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 
 	if pr.GetType() == pb.Pointer_REMOTE {
 		seg := pr.GetRemote()
-		pid := client.PieceID(seg.PieceId)
+		pid := client.PieceID(seg.GetPieceId())
 
 		// Get the list of remote pieces from the pointer
 		originalNodes, err := s.lookupNodes(ctx, seg)
@@ -293,7 +297,7 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 		var excludeNodeIDs []dht.NodeID
 		for _, v := range originalNodes {
 			if v != nil {
-				excludeNodeIDs = append(excludeNodeIDs, node.IDFromString(v.Id))
+				excludeNodeIDs = append(excludeNodeIDs, node.IDFromString(v.GetId()))
 			}
 		}
 
@@ -317,6 +321,9 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 
 		//Request Overlay for n-h new storage nodes
 		newNodes, err := s.getNewUniqueNodes(ctx, excludeNodeIDs, totalNilNodes, 0)
+		if err != nil {
+			return Error.New("Error in receiving requested nodes")
+		}
 
 		totalRepairCount := len(newNodes)
 		if totalRepairCount != totalNilNodes {
@@ -325,13 +332,12 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 
 		//make a repair nodes list just with new unique ids
 		repairNodesList := make([]*pb.Node, len(originalNodes))
-		for _, vn := range newNodes {
-			for j, vr := range originalNodes {
-				// find the nil in the original node list
-				if vr == nil {
-					// replace the location with the newNode Node info
-					repairNodesList[j] = vn
-				}
+		for j, vr := range originalNodes {
+			// find the nil in the original node list
+			if vr == nil {
+				// replace the location with the newNode Node info
+				totalRepairCount = totalRepairCount - 1
+				repairNodesList[j] = newNodes[totalRepairCount]
 			}
 		}
 
@@ -340,8 +346,13 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 			return Error.Wrap(err)
 		}
 
+		signedMessage, err := s.pdb.SignedMessage()
+		if err != nil {
+			return Error.Wrap(err)
+		}
+
 		// download the segment using the nodes just with healthy nodes
-		rr, err := s.ec.Get(ctx, originalNodes, es, pid, pr.GetSize())
+		rr, err := s.ec.Get(ctx, originalNodes, es, pid, pr.GetSize(), signedMessage)
 		if err != nil {
 			return Error.Wrap(err)
 		}
@@ -352,18 +363,11 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 			return err
 		}
 
-		/* to really make the piecenodes unique test code */
-		// ecclient sends delete request
-		err = s.ec.Delete(ctx, newNodes, pid)
-		if err != nil {
-			return Error.Wrap(err)
-		}
-
 		// puts file to ecclient
 		exp := pr.GetExpirationDate()
 
 		//@TODO-ASK check the expiration timer
-		successfulNodes, err := s.ec.Put(ctx, repairNodesList, s.rs, pid, r, time.Time{})
+		successfulNodes, err := s.ec.Put(ctx, repairNodesList, s.rs, pid, r, time.Time{}, signedMessage)
 		if err != nil {
 			return Error.Wrap(err)
 		}
@@ -392,38 +396,11 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 
 // getNewUniqueNodes gets a list of new nodes different from the passed nodes list
 func (s *segmentStore) getNewUniqueNodes(ctx context.Context, nodes []dht.NodeID, numOfNodes int, space int64) ([]*pb.Node, error) {
-	op := overlay.Options{Amount: numOfNodes, Space: space, Excluded: nodes}
+	op := overlay.Options{Amount: numOfNodes * 3, Space: space, Excluded: nodes}
 	newNodes, err := s.oc.Choose(ctx, op)
 	if err != nil {
 		return nil, err
 	}
-
-	// if nodes == nil {
-	// 	return newNodes, err
-	// }
-	// log.Println("KISHORE --> list of newNodes ", newNodes)
-
-	// uniqueNodes := len(newNodes)
-	// for uniqueNodes > 0 {
-	// 	for j := range newNodes {
-	// 		for i := range nodes {
-
-	// 			if newNodes[j] == nodes[i] {
-	// 				uniqueNodes = uniqueNodes + 1
-	// 			}
-	// 		}
-	// 		uniqueNodes = (uniqueNodes - 1)
-	// 		log.Println("KISHORE --> uniqueNodes = ", uniqueNodes)
-	// 	}
-	// 	if uniqueNodes > 0 {
-	// 		// request a new set of nodes
-	// 		newNodes, err = s.oc.Choose(ctx, numOfNodes, space)
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 	}
-	// 	log.Println("KISHORE --> got unique nodes")
-	// }
 	return newNodes, err
 }
 
