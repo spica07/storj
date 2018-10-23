@@ -393,16 +393,6 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 	return err
 }
 
-// getNewUniqueNodes gets a list of new nodes different from the passed nodes list
-func (s *segmentStore) getNewUniqueNodes(ctx context.Context, nodes []dht.NodeID, numOfNodes int, space int64) ([]*pb.Node, error) {
-	op := overlay.Options{Amount: numOfNodes * 3, Space: space, Excluded: nodes}
-	newNodes, err := s.oc.Choose(ctx, op)
-	if err != nil {
-		return nil, err
-	}
-	return newNodes, err
-}
-
 // lookupNodes calls Lookup to get node addresses from the overlay
 func (s *segmentStore) lookupNodes(ctx context.Context, seg *pb.RemoteSegment) (nodes []*pb.Node, err error) {
 	// Get list of all nodes IDs storing a piece from the segment
