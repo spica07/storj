@@ -11,7 +11,6 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/vivint/infectious"
-	"github.com/zeebo/errs"
 	"go.uber.org/zap"
 	monkit "gopkg.in/spacemonkeygo/monkit.v2"
 
@@ -283,115 +282,115 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 		return Error.Wrap(err)
 	}
 
-	if pr.GetType() == pb.Pointer_REMOTE {
-		seg := pr.GetRemote()
-		pid := client.PieceID(seg.GetPieceId())
+	if pr.GetType() != pb.Pointer_REMOTE {
+		return Error.New("Cannot repair inline segment")
+	}
 
-		// Get the list of remote pieces from the pointer
-		originalNodes, err := s.lookupNodes(ctx, seg)
-		if err != nil {
-			return Error.Wrap(err)
+	seg := pr.GetRemote()
+	pid := client.PieceID(seg.GetPieceId())
+
+	// Get the list of remote pieces from the pointer
+	originalNodes, err := s.lookupNodes(ctx, seg)
+	if err != nil {
+		return Error.Wrap(err)
+	}
+
+	// get the nodes list that needs to be excluded
+	var excludeNodeIDs []dht.NodeID
+	for _, v := range originalNodes {
+		if v != nil {
+			excludeNodeIDs = append(excludeNodeIDs, node.IDFromString(v.GetId()))
 		}
+	}
 
-		// get the nodes list that needs to be excluded
-		var excludeNodeIDs []dht.NodeID
-		for _, v := range originalNodes {
-			if v != nil {
-				excludeNodeIDs = append(excludeNodeIDs, node.IDFromString(v.GetId()))
+	//remove all lost pieces from the list to have only healthy pieces
+	for j := range originalNodes {
+		for i := range lostPieces {
+			if j == lostPieces[i] {
+				originalNodes[j] = nil
 			}
 		}
+	}
 
-		//remove all lost pieces from the list to have only healthy pieces
-		for j := range originalNodes {
-			for i := range lostPieces {
-				if j == lostPieces[i] {
-					originalNodes[j] = nil
-				}
-			}
+	// count the number of nil nodes thats needs to be repaired
+	totalNilNodes := 0
+	for i := range originalNodes {
+		if originalNodes[i] == nil {
+			totalNilNodes++
+			continue
 		}
+	}
 
-		// count the number of nil nodes thats needs to be repaired
-		totalNilNodes := 0
-		for i := range originalNodes {
-			if originalNodes[i] == nil {
-				totalNilNodes = totalNilNodes + 1
-				continue
-			}
-		}
-
-		//Request Overlay for n-h new storage nodes
-		newNodes, err := s.getNewUniqueNodes(ctx, excludeNodeIDs, totalNilNodes, 0)
-		if err != nil {
-			return Error.New("Error in receiving requested nodes")
-		}
-
-		totalRepairCount := len(newNodes)
-		if totalRepairCount != totalNilNodes {
-			return Error.New("Expected nodes count different")
-		}
-
-		//make a repair nodes list just with new unique ids
-		repairNodesList := make([]*pb.Node, len(originalNodes))
-		for j, vr := range originalNodes {
-			// find the nil in the original node list
-			if vr == nil {
-				// replace the location with the newNode Node info
-				totalRepairCount = totalRepairCount - 1
-				repairNodesList[j] = newNodes[totalRepairCount]
-			}
-		}
-
-		es, err := makeErasureScheme(pr.GetRemote().GetRedundancy())
-		if err != nil {
-			return Error.Wrap(err)
-		}
-
-		signedMessage, err := s.pdb.SignedMessage()
-		if err != nil {
-			return Error.Wrap(err)
-		}
-
-		// download the segment using the nodes just with healthy nodes
-		rr, err := s.ec.Get(ctx, originalNodes, es, pid, pr.GetSize(), signedMessage)
-		if err != nil {
-			return Error.Wrap(err)
-		}
-
-		// get io.Reader from ranger
-		r, err := rr.Range(ctx, 0, rr.Size())
-		if err != nil {
-			return err
-		}
-
-		// puts file to ecclient
-		exp := pr.GetExpirationDate()
-
-		//@TODO-ASK check the expiration timer
-		successfulNodes, err := s.ec.Put(ctx, repairNodesList, s.rs, pid, r, time.Time{}, signedMessage)
-		if err != nil {
-			return Error.Wrap(err)
-		}
-
-		// merge the successful nodes list into the originalNodes list
-		for i, v := range originalNodes {
-			if v == nil {
-				// copy the successfuNode info
-				originalNodes[i] = successfulNodes[i]
-			}
-		}
-
-		metadata := pr.GetMetadata()
-		pointer, err := s.makeRemotePointer(originalNodes, pid, rr.Size(), exp, metadata)
-		if err != nil {
-			return err
-		}
-
-		// update the segment info in the pointerDB
-		err = s.pdb.Put(ctx, path, pointer)
+	//Request Overlay for n-h new storage nodes
+	newNodes, err := s.oc.Choose(ctx, overlay.Options{Amount: totalNilNodes, Space: 0, Excluded: excludeNodeIDs})
+	if err != nil {
 		return err
 	}
 
-	return errs.New("Cannot repair inline segment")
+	totalRepairCount := len(newNodes)
+	if totalRepairCount != totalNilNodes {
+		return Error.New("Expected nodes count different")
+	}
+
+	//make a repair nodes list just with new unique ids
+	repairNodesList := make([]*pb.Node, len(originalNodes))
+	for j, vr := range originalNodes {
+		// find the nil in the original node list
+		if vr == nil {
+			// replace the location with the newNode Node info
+			totalRepairCount = totalRepairCount - 1
+			repairNodesList[j] = newNodes[totalRepairCount]
+		}
+	}
+
+	es, err := makeErasureScheme(pr.GetRemote().GetRedundancy())
+	if err != nil {
+		return Error.Wrap(err)
+	}
+
+	signedMessage, err := s.pdb.SignedMessage()
+	if err != nil {
+		return Error.Wrap(err)
+	}
+
+	// download the segment using the nodes just with healthy nodes
+	rr, err := s.ec.Get(ctx, originalNodes, es, pid, pr.GetSize(), signedMessage)
+	if err != nil {
+		return Error.Wrap(err)
+	}
+
+	// get io.Reader from ranger
+	r, err := rr.Range(ctx, 0, rr.Size())
+	if err != nil {
+		return err
+	}
+
+	// puts file to ecclient
+	exp := pr.GetExpirationDate()
+
+	//@TODO-ASK check the expiration timer
+	successfulNodes, err := s.ec.Put(ctx, repairNodesList, s.rs, pid, r, time.Time{}, signedMessage)
+	if err != nil {
+		return Error.Wrap(err)
+	}
+
+	// merge the successful nodes list into the originalNodes list
+	for i, v := range originalNodes {
+		if v == nil {
+			// copy the successfuNode info
+			originalNodes[i] = successfulNodes[i]
+		}
+	}
+
+	metadata := pr.GetMetadata()
+	pointer, err := s.makeRemotePointer(originalNodes, pid, rr.Size(), exp, metadata)
+	if err != nil {
+		return err
+	}
+
+	// update the segment info in the pointerDB
+	err = s.pdb.Put(ctx, path, pointer)
+	return err
 }
 
 // getNewUniqueNodes gets a list of new nodes different from the passed nodes list
