@@ -51,7 +51,6 @@ func (cursor *Cursor) NextStripe(ctx context.Context) (stripe *Stripe, err error
 	} else {
 		pointerItems, more, err = cursor.pointers.List(ctx, nil, *cursor.lastPath, nil, true, 0, meta.None)
 	}
-
 	if err != nil {
 		return nil, err
 	}
