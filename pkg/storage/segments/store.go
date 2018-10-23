@@ -24,6 +24,7 @@ import (
 	"storj.io/storj/pkg/pointerdb/pdbclient"
 	"storj.io/storj/pkg/ranger"
 	ecclient "storj.io/storj/pkg/storage/ec"
+	"storj.io/storj/pkg/utils"
 )
 
 var (
@@ -361,6 +362,7 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 	if err != nil {
 		return err
 	}
+	defer utils.LogClose(r)
 
 	// puts file to ecclient
 	exp, err := ptypes.Timestamp(pr.GetExpirationDate())
