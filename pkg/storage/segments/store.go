@@ -363,10 +363,13 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 	}
 
 	// puts file to ecclient
-	exp := pr.GetExpirationDate()
+	exp, err := ptypes.Timestamp(pr.GetExpirationDate())
+	if err != nil {
+		return err
+	}
 
 	//@TODO-ASK check the expiration timer
-	successfulNodes, err := s.ec.Put(ctx, repairNodesList, s.rs, pid, r, time.Time{}, signedMessage)
+	successfulNodes, err := s.ec.Put(ctx, repairNodesList, s.rs, pid, r, exp, signedMessage)
 	if err != nil {
 		return Error.Wrap(err)
 	}
@@ -380,7 +383,7 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 	}
 
 	metadata := pr.GetMetadata()
-	pointer, err := s.makeRemotePointer(originalNodes, pid, rr.Size(), exp, metadata)
+	pointer, err := s.makeRemotePointer(originalNodes, pid, rr.Size(), pr.GetExpirationDate(), metadata)
 	if err != nil {
 		return err
 	}
