@@ -328,9 +328,6 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 	}
 
 	totalRepairCount := len(newNodes)
-	if totalRepairCount != totalNilNodes {
-		return Error.New("Expected nodes count different")
-	}
 
 	//make a repair nodes list just with new unique ids
 	repairNodesList := make([]*pb.Node, len(originalNodes))
@@ -338,7 +335,7 @@ func (s *segmentStore) Repair(ctx context.Context, path paths.Path, lostPieces [
 		// find the nil in the original node list
 		if vr == nil {
 			// replace the location with the newNode Node info
-			totalRepairCount = totalRepairCount - 1
+			totalRepairCount--
 			repairNodesList[j] = newNodes[totalRepairCount]
 		}
 	}
