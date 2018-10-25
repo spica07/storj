@@ -249,22 +249,19 @@ func TestSegmentStoreRepairRemote(t *testing.T) {
 	assert.NoError(t, err)
 
 	for _, tt := range []struct {
-		pathInput               string
-		thresholdSize           int
-		pointerType             pb.Pointer_DataType
-		size                    int64
-		metadata                []byte
-		pieceID                 string
-		lostPieces              []int
-		remotePieces            []*pb.RemotePiece
-		originalNodes           []*pb.Node
-		originalIDs             []dht.NodeID
-		newNodes                []*pb.Node
-		successfulNodes         []*pb.Node
-		data                    string
-		strsize, offset, length int64
-		substr                  string
-		meta                    Meta
+		pathInput       string
+		thresholdSize   int
+		pointerType     pb.Pointer_DataType
+		size            int64
+		metadata        []byte
+		pieceID         string
+		lostPieces      []int
+		remotePieces    []*pb.RemotePiece
+		originalNodes   []*pb.Node
+		originalIDs     []dht.NodeID
+		newNodes        []*pb.Node
+		successfulNodes []*pb.Node
+		data            string
 	}{
 		{
 			pathInput:     "path/1/2/3",
@@ -286,11 +283,6 @@ func TestSegmentStoreRepairRemote(t *testing.T) {
 			newNodes:        []*pb.Node{{Id: "8"}, {Id: "9"}},
 			successfulNodes: []*pb.Node{nil, {Id: "9"}, {Id: "8"}, nil, nil, nil, nil, nil},
 			data:            "abcdefghijkl",
-			strsize:         12,
-			offset:          1,
-			length:          4,
-			substr:          "bcde",
-			meta:            Meta{},
 		},
 	} {
 		mockOC := mock_overlay.NewMockClient(ctrl)
