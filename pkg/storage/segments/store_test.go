@@ -13,11 +13,15 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/stretchr/testify/assert"
 
+	"storj.io/storj/pkg/dht"
 	"storj.io/storj/pkg/eestream"
 	mock_eestream "storj.io/storj/pkg/eestream/mocks"
+	"storj.io/storj/pkg/node"
+	"storj.io/storj/pkg/overlay"
 	mock_overlay "storj.io/storj/pkg/overlay/mocks"
 	"storj.io/storj/pkg/paths"
 	"storj.io/storj/pkg/pb"
+	"storj.io/storj/pkg/piecestore/rpc/client"
 	pdb "storj.io/storj/pkg/pointerdb/pdbclient"
 	mock_pointerdb "storj.io/storj/pkg/pointerdb/pdbclient/mocks"
 	"storj.io/storj/pkg/ranger"
@@ -250,21 +254,61 @@ func TestSegmentStoreRepairRemote(t *testing.T) {
 		pointerType             pb.Pointer_DataType
 		size                    int64
 		metadata                []byte
+		pieceID                 string
 		lostPieces              []int
+		remotePieces            []*pb.RemotePiece
+		originalNodes           []*pb.Node
+		originalIDs             []dht.NodeID
 		newNodes                []*pb.Node
+		successfulNodes         []*pb.Node
 		data                    string
 		strsize, offset, length int64
 		substr                  string
 		meta                    Meta
 	}{
-		{"path/1/2/3", 10, pb.Pointer_REMOTE, int64(3), []byte("metadata"), []int{}, []*pb.Node{{Id: "1"}, {Id: "2"}}, "abcdefghijkl", 12, 1, 4, "bcde", Meta{}},
+		{
+			pathInput:     "path/1/2/3",
+			thresholdSize: 10,
+			pointerType:   pb.Pointer_REMOTE,
+			size:          int64(3),
+			metadata:      []byte("metadata"),
+			pieceID:       "myPieceID",
+			lostPieces:    []int{1, 2},
+			remotePieces: []*pb.RemotePiece{
+				{PieceNum: 0, NodeId: "0"}, {PieceNum: 1, NodeId: "1"}, {PieceNum: 2, NodeId: "2"}, {PieceNum: 3, NodeId: "3"},
+				{PieceNum: 4, NodeId: "4"}, {PieceNum: 5, NodeId: "5"}, {PieceNum: 6, NodeId: "6"}, {PieceNum: 7, NodeId: "7"},
+			},
+			originalNodes: []*pb.Node{{Id: "0"}, {Id: "1"}, {Id: "2"}, {Id: "3"}, {Id: "4"}, {Id: "5"}, {Id: "6"}, {Id: "7"}},
+			originalIDs: []dht.NodeID{
+				node.IDFromString("0"), node.IDFromString("1"), node.IDFromString("2"), node.IDFromString("3"),
+				node.IDFromString("4"), node.IDFromString("5"), node.IDFromString("6"), node.IDFromString("7"),
+			},
+			newNodes:        []*pb.Node{{Id: "8"}, {Id: "9"}},
+			successfulNodes: []*pb.Node{nil, {Id: "9"}, {Id: "8"}, nil, nil, nil, nil, nil},
+			data:            "abcdefghijkl",
+			strsize:         12,
+			offset:          1,
+			length:          4,
+			substr:          "bcde",
+			meta:            Meta{},
+		},
 	} {
 		mockOC := mock_overlay.NewMockClient(ctrl)
 		mockEC := mock_ecclient.NewMockClient(ctrl)
 		mockPDB := mock_pointerdb.NewMockClient(ctrl)
-		mockES := mock_eestream.NewMockErasureScheme(ctrl)
+		scheme := &pb.RedundancyScheme{
+			Type:             pb.RedundancyScheme_RS,
+			MinReq:           4,
+			Total:            8,
+			RepairThreshold:  7,
+			SuccessThreshold: 6,
+			ErasureShareSize: 1024,
+		}
+		es, err := makeErasureScheme(scheme)
+		assert.NoError(t, err)
+
 		rs := eestream.RedundancyStrategy{
-			ErasureScheme: mockES,
+			ErasureScheme: es,
 		}
 
 		ss := segmentStore{mockOC, mockEC, mockPDB, rs, tt.thresholdSize}
@@ -272,46 +316,44 @@ func TestSegmentStoreRepairRemote(t *testing.T) {
 
 		p := paths.New(tt.pathInput)
 
+		exp, err := ptypes.Timestamp(someTime)
+		assert.NoError(t, err)
+
+		rr := ranger.ByteRanger([]byte(tt.data))
+		r, err := rr.Range(ctx, 0, rr.Size())
+		assert.NoError(t, err)
+
 		calls := []*gomock.Call{
 			mockPDB.EXPECT().Get(
-				gomock.Any(), gomock.Any(),
+				gomock.Any(), p,
 			).Return(&pb.Pointer{
 				Type: tt.pointerType,
 				Remote: &pb.RemoteSegment{
-					Redundancy: &pb.RedundancyScheme{
-						Type:             pb.RedundancyScheme_RS,
-						MinReq:           1,
-						Total:            2,
-						RepairThreshold:  1,
-						SuccessThreshold: 2,
-					},
-					PieceId:      "here's my piece id",
-					RemotePieces: []*pb.RemotePiece{},
+					Redundancy:   scheme,
+					PieceId:      tt.pieceID,
+					RemotePieces: tt.remotePieces,
 				},
 				CreationDate:   someTime,
 				ExpirationDate: someTime,
 				Size:           tt.size,
 				Metadata:       tt.metadata,
 			}, nil),
-			mockOC.EXPECT().BulkLookup(gomock.Any(), gomock.Any()),
-			mockOC.EXPECT().Choose(gomock.Any(), gomock.Any()).Return(tt.newNodes, nil),
+			mockOC.EXPECT().BulkLookup(gomock.Any(), gomock.Any()).Return(tt.originalNodes, nil),
+			mockOC.EXPECT().Choose(gomock.Any(), overlay.Options{Amount: 2, Space: 0, Excluded: tt.originalIDs}).Return(tt.newNodes, nil),
 			mockPDB.EXPECT().SignedMessage(),
 			mockEC.EXPECT().Get(
-				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-			).Return(ranger.ByteRanger([]byte(tt.data)), nil),
+				gomock.Any(), gomock.Any(), es, client.PieceID(tt.pieceID), tt.size, gomock.Any(),
+			).Return(rr, nil),
 			mockEC.EXPECT().Put(
-				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-			).Return(tt.newNodes, nil),
-			mockES.EXPECT().RequiredCount().Return(1),
-			mockES.EXPECT().TotalCount().Return(1),
-			mockES.EXPECT().ErasureShareSize().Return(1),
+				gomock.Any(), tt.successfulNodes, rs, client.PieceID(tt.pieceID), r, exp, gomock.Any(),
+			).Return(tt.successfulNodes, nil),
 			mockPDB.EXPECT().Put(
-				gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(), p, gomock.Any(),
 			).Return(nil),
 		}
 		gomock.InOrder(calls...)
 
-		err := ss.Repair(ctx, p, tt.lostPieces)
+		err = ss.Repair(ctx, p, tt.lostPieces)
 		assert.NoError(t, err)
 	}
 }
