@@ -81,7 +81,7 @@ func bootstrapTestNetwork(t *testing.T, ip, port string) ([]dht.DHT, pb.Node) {
 	assert.NoError(t, err)
 	bootNode := rt.Local()
 
-	go func(){
+	go func() {
 		err = boot.ListenAndServe()
 		assert.NoError(t, err)
 	}()
@@ -100,7 +100,7 @@ func bootstrapTestNetwork(t *testing.T, ip, port string) ([]dht.DHT, pb.Node) {
 
 		p++
 		dhts = append(dhts, dht)
-		go func(){
+		go func() {
 			err = dht.ListenAndServe()
 			assert.NoError(t, err)
 		}()
@@ -623,7 +623,7 @@ func TestRefresh(t *testing.T) {
 
 			dht := newTestKademlia(t, "127.0.0.1", "1024", dhts[rand.Intn(testNetSize)], b)
 
-			_cache := &Cache{ DB:  db, DHT: dht}
+			_cache := &Cache{DB: db, DHT: dht}
 
 			err := _cache.Refresh(ctx)
 			assert.Equal(t, err, c.expectedErr)
